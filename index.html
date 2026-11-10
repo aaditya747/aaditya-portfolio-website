@@ -573,7 +573,7 @@ window.addEventListener('load',()=>{
      duration_ms:extra.duration_ms||0,scroll_percent:extra.scroll_percent||0
    };
    try{
-     await fetch('api/ https://aaditya-portfolio-tracker.aadityamahajan183.workers.dev/event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true});
+     await fetch('https://aaditya-portfolio-tracker.aadityamahajan183.workers.dev/event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true});
    }catch(e){/* analytics failure never blocks site usage */}
  }
  function pageView(){pageStarted=Date.now();sendEvent('page_view',null,{target_type:'page',target_label:document.title,target_url:pageName()})}
