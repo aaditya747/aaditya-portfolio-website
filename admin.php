@@ -1,0 +1,38 @@
+<?php
+declare(strict_types=1);
+require __DIR__ . '/api/config.php';
+$isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+session_set_cookie_params(['httponly'=>true,'secure'=>$isHttps,'samesite'=>'Strict']);
+session_start();
+$adminUser = getenv('ANALYTICS_ADMIN_USER') ?: '';
+$adminPass = getenv('ANALYTICS_ADMIN_PASS') ?: '';
+if ($adminUser === '' || $adminPass === '') { http_response_code(503); exit('Admin login is not configured. Set ANALYTICS_ADMIN_USER and ANALYTICS_ADMIN_PASS on your host.'); }
+if (isset($_POST['logout'])) { session_destroy(); header('Location: admin.php'); exit; }
+$error = '';
+if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['username'],$_POST['password'])) {
+  if (hash_equals($adminUser,(string)$_POST['username']) && hash_equals($adminPass,(string)$_POST['password'])) {
+    session_regenerate_id(true); $_SESSION['portfolio_admin']=true; header('Location: admin.php'); exit;
+  }
+  $error='Incorrect username or password.';
+}
+function h($v): string { return htmlspecialchars((string)$v,ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8'); }
+if (empty($_SESSION['portfolio_admin'])):
+?><!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Private Activity Log</title><style>
+*{box-sizing:border-box}body{margin:0;background:#05060a;color:#edf5ff;font:15px Arial;display:grid;place-items:center;min-height:100vh}.box{width:min(400px,90vw);padding:30px;background:#0d1322;border:1px solid #244057;border-radius:16px}h1{font-size:24px}label{display:block;margin:15px 0 7px;color:#a9bad2}input{width:100%;padding:12px;background:#070b13;border:1px solid #2b4058;border-radius:8px;color:white}button{margin-top:18px;padding:12px 16px;background:#07333c;border:1px solid #00d9e8;border-radius:8px;color:#aefaff;cursor:pointer}.err{color:#ff8a9a}
+</style></head><body><form class="box" method="post"><h1>Private activity log</h1><p>Administrator sign-in only.</p><?php if($error):?><p class="err"><?=h($error)?></p><?php endif?><label>Username</label><input name="username" autocomplete="username" required><label>Password</label><input name="password" type="password" autocomplete="current-password" required><button>Sign in</button></form></body></html><?php exit; endif;
+try {
+ $pdo=db();
+ $summary=$pdo->query("SELECT COUNT(*) events,COUNT(DISTINCT visitor_id) visitors,COUNT(DISTINCT session_id) sessions,SUM(event_type='page_view') page_views,SUM(event_type='click') clicks,SUM(event_type='download') downloads,SUM(event_type='project_open') project_opens,SUM(event_type='folder_open') folder_opens,SUM(event_type='file_preview') file_previews FROM portfolio_events")->fetch();
+ $recent=$pdo->query("SELECT * FROM portfolio_events ORDER BY id DESC LIMIT 500")->fetchAll();
+ $top=$pdo->query("SELECT event_type,target_label,COUNT(*) total FROM portfolio_events WHERE target_label<>'' GROUP BY event_type,target_label ORDER BY total DESC LIMIT 20")->fetchAll();
+} catch(Throwable $e) { http_response_code(503); exit('Database unavailable. Import the latest database/schema.sql and configure DB_HOST, DB_NAME, DB_USER and DB_PASS.'); }
+?><!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Private Portfolio Activity</title><style>
+*{box-sizing:border-box}body{margin:0;background:#05060a;color:#edf5ff;font:14px Arial}main{max-width:1500px;margin:auto;padding:28px 18px}header{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}h1{font-size:26px}.muted{color:#9babc2}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:24px 0}.card,section{background:#0c1321;border:1px solid #23384f;border-radius:13px;padding:16px}.card b{display:block;color:#00e7f4;font-size:25px;margin-top:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1300px}th,td{text-align:left;padding:10px;border-bottom:1px solid #233449;font-size:12px;vertical-align:top}th{color:#00e7f4;font-family:monospace;position:sticky;top:0;background:#0c1321}td{color:#cbd7e8;max-width:260px;overflow-wrap:anywhere}button{padding:9px 13px;border:1px solid #35506a;background:#101d2d;color:white;border-radius:8px;cursor:pointer}.pill{color:#00e7f4}.small{font-size:11px;color:#9babc2}.topitems{display:grid;gap:7px}.topitems div{padding:8px;border-bottom:1px solid #233449}.notice{padding:12px;border:1px solid #384d68;border-radius:9px;color:#b7c8df;font-size:12px;line-height:1.6}@media(max-width:850px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}
+</style></head><body><main>
+<header><div><h1>Portfolio activity log</h1><p class="muted">Private administrator view · latest 500 events · consent-based tracking</p></div><form method="post"><button name="logout" value="1">Sign out</button></form></header>
+<div class="cards"><?php foreach(['visitors'=>'Unique browsers','sessions'=>'Sessions','page_views'=>'Page views','clicks'=>'Clicks','project_opens'=>'Projects opened','folder_opens'=>'Folders opened','file_previews'=>'Files previewed','downloads'=>'Download clicks'] as $k=>$label):?><div class="card"><span class="muted"><?=h($label)?></span><b><?=number_format((int)($summary[$k]??0))?></b></div><?php endforeach?></div>
+<div class="grid"><section><h3>Most interacted items</h3><?php if(!$top):?><p class="muted">No activity recorded yet.</p><?php else:?><div class="topitems"><?php foreach($top as $r):?><div><span class="pill"><?=h($r['event_type'])?></span> · <?=h($r['target_label'])?> <b style="float:right"><?=number_format((int)$r['total'])?></b></div><?php endforeach?></div><?php endif?></section><section><h3>What each record contains</h3><p class="muted">Visitor/session token, action, clicked item, URL, page, page title, element ID/class, referrer, timestamp, scroll milestone, page duration, screen dimensions, language, shortened IP prefix, browser, operating system and device category.</p><div class="notice">This does not identify a verified person. Browser IDs can change or be shared. A download event means a download link was clicked, not that the file was successfully saved. No emails, typed text, passwords or form contents are collected.</div></section></div>
+<section><h3>All recorded activity · newest first</h3><div class="tablewrap"><table><thead><tr><th>Time</th><th>Visitor</th><th>Session</th><th>Action</th><th>Target</th><th>Label</th><th>URL</th><th>Page</th><th>Duration ms</th><th>Scroll %</th><th>IP prefix</th><th>Browser / OS</th><th>Device</th><th>Screen</th><th>Referrer</th></tr></thead><tbody><?php foreach($recent as $r):?><tr>
+<td><?=h($r['created_at'])?></td><td><?=h(substr($r['visitor_id'],0,13))?></td><td><?=h(substr($r['session_id'],0,13))?></td><td class="pill"><?=h($r['event_type'])?></td><td><?=h($r['target_type'])?></td><td><?=h($r['target_label'])?><div class="small"><?=h($r['element_id'].' '.$r['element_class'])?></div></td><td><?=h($r['target_url'])?></td><td><?=h($r['page_path'])?><div class="small"><?=h($r['page_title'])?></div></td><td><?=number_format((int)$r['duration_ms'])?></td><td><?=h($r['scroll_percent'])?></td><td><?=h($r['ip_prefix'])?></td><td><?=h($r['browser'].' / '.$r['operating_system'])?></td><td><?=h($r['device_type'])?></td><td><?=h($r['screen_width'].' × '.$r['screen_height'])?></td><td><?=h($r['referrer'])?></td></tr><?php endforeach?></tbody></table></div></section>
+<p class="muted">Recommended: retain event-level data only as long as needed (for example, 90 days), then delete older rows. Keep HTTPS enabled and never share admin credentials.</p>
+</main></body></html>
